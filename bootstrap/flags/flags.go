@@ -23,7 +23,7 @@ import (
 
 const (
 	DefaultConfigProvider = "consul.http://localhost:8500"
-	DefaultConfigFile     = "configuration.toml"
+	DefaultConfigFile     = "configuration.yaml"
 )
 
 // Common is an interface that defines AP for the common command-line flags used by most EdgeX services
@@ -148,7 +148,7 @@ func (d *Default) helpCallback() {
 			"    -o, --overwrite                 Overwrite configuration in provider with local configuration\n"+
 			"                                    *** Use with cation *** Use will clobber existing settings in provider,\n"+
 			"                                    problematic if those settings were edited by hand intentionally\n"+
-			"    -cf, --configFile <name>        Indicates name of the local configuration file. Defaults to configuration.toml\n"+
+			"    -cf, --configFile <name>        Indicates name of the local configuration file. Defaults to configuration.yaml\n"+
 			"    -p, --profile <name>            Indicate configuration profile other than default\n"+
 			"    -cd, --configDir                Specify local configuration directory\n"+
 			"    -r, --registry                  Indicates service should use Registry.\n"+

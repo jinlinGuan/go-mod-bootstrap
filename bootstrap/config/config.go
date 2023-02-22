@@ -23,6 +23,7 @@ import (
 	"github.com/edgexfoundry/go-mod-core-contracts/v3/common"
 	"github.com/mitchellh/copystructure"
 	"math"
+	"os"
 	"reflect"
 	"strconv"
 	"sync"
@@ -43,6 +44,7 @@ import (
 	"github.com/edgexfoundry/go-mod-core-contracts/v3/clients/logger"
 
 	"github.com/pelletier/go-toml"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -152,6 +154,8 @@ func (cp *Processor) Process(
 		if err != nil {
 			return fmt.Errorf("failed check for Configuration Provider has private configiuration: %s", err.Error())
 		}
+		cp.lc.Infof(">>>>> cp.providerHasConfig: %v", cp.providerHasConfig)
+		cp.lc.Infof(">>>>> cp.overwriteConfig: %v", cp.overwriteConfig)
 		if cp.providerHasConfig && !cp.overwriteConfig {
 			privateServiceConfig, err = copyConfigurationStruct(serviceConfig)
 			if err != nil {
@@ -160,31 +164,52 @@ func (cp *Processor) Process(
 			if err := cp.loadConfigFromProvider(privateServiceConfig, privateConfigClient); err != nil {
 				return err
 			}
+			cp.lc.Infof(">>>>> serviceConfig:%v", serviceConfig)
+			cp.lc.Infof(">>>>> privateServiceConfig:%v", privateServiceConfig)
 			if err := mergeConfigs(serviceConfig, privateServiceConfig); err != nil {
 				return fmt.Errorf("could not merge common and private configurations: %s", err.Error())
 			}
 		}
 	}
 
+	cp.lc.Infof(">>>>> useProvider: %v", useProvider)
+	cp.lc.Infof(">>>>> cp.providerHasConfig: %v", cp.providerHasConfig)
+	cp.lc.Infof(">>>>> cp.overwriteConfig: %v", cp.overwriteConfig)
 	// Now must load configuration from local file if any of these conditions are true
 	if !useProvider || !cp.providerHasConfig || cp.overwriteConfig {
-		// tomlTree contains the service's private configuration in its toml tree form
-		tomlTree, err := cp.loadPrivateFromFile()
+		//// tomlTree contains the service's private configuration in its toml tree form
+		yamlFile, err := cp.loadPrivateFromFile()
 		if err != nil {
 			return err
 		}
+
+		config := make(map[string]interface{})
+		err = yaml.Unmarshal(yamlFile, &config)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal private configuration file: %s", err.Error())
+		}
+
 		cp.lc.Info("Using local private configuration from file")
-		if err := cp.mergeTomlWithConfig(serviceConfig, tomlTree); err != nil {
+
+		cp.lc.Infof(">>>>> serviceConfig:%v", serviceConfig)
+		cp.lc.Infof(">>>>> yaml unmarshal config:%v", config)
+		if err := mergeConfigs(serviceConfig, config); err != nil {
 			return err
 		}
+		cp.lc.Infof(">>>>> serviceConfig:%v", serviceConfig)
+		////if err := cp.mergeTomlWithConfig(serviceConfig, tomlTree); err != nil {
+		////	return err
+		////}
 		if useProvider {
-			if err := privateConfigClient.PutConfigurationToml(tomlTree, cp.overwriteConfig); err != nil {
+			if err := privateConfigClient.PutConfiguration(config, cp.overwriteConfig); err != nil {
 				return fmt.Errorf("could not push configuration into Configuration Provider: %s", err.Error())
 			}
+			////if err := privateConfigClient.PutConfigurationToml(tomlTree, cp.overwriteConfig); err != nil {
+			////	return fmt.Errorf("could not push configuration into Configuration Provider: %s", err.Error())
+			////}
 
 			cp.lc.Info("Configuration has been pushed to into Configuration Provider")
 		}
-
 	}
 
 	// apply overrides
@@ -333,13 +358,19 @@ func (cp *Processor) LoadCustomConfigSection(config interfaces.UpdatableConfig, 
 	configClient := container.ConfigClientFrom(cp.dic.Get)
 	if configClient == nil {
 		cp.lc.Info("Skipping use of Configuration Provider for custom configuration: Provider not available")
-		tomlTree, err := cp.loadPrivateFromFile()
+		////tomlTree, err := cp.loadPrivateFromFile()
+		yamlFile, err := cp.loadPrivateFromFile()
 		if err != nil {
 			return err
 		}
-		if err := tomlTree.Unmarshal(config); err != nil {
-			return fmt.Errorf("could not load toml tree into custom config: %s", err.Error())
+
+		err = yaml.Unmarshal(yamlFile, &config)
+		if err != nil {
+			return fmt.Errorf("could not load yaml content into custom config: %s", err.Error())
 		}
+		////if err := tomlTree.Unmarshal(config); err != nil {
+		////	return fmt.Errorf("could not load toml tree into custom config: %s", err.Error())
+		////}
 	} else {
 		cp.lc.Infof("Checking if custom configuration ('%s') exists in Configuration Provider", sectionName)
 
@@ -363,12 +394,16 @@ func (cp *Processor) LoadCustomConfigSection(config interfaces.UpdatableConfig, 
 				return fmt.Errorf("unable to update custom configuration from Configuration Provider")
 			}
 		} else {
-			tomlTree, err := cp.loadPrivateFromFile()
+			////tomlTree, err := cp.loadPrivateFromFile()
+			yamlFile, err := cp.loadPrivateFromFile()
 			if err != nil {
 				return err
 			}
-			if err := tomlTree.Unmarshal(config); err != nil {
-				return fmt.Errorf("could not load toml tree into custom config: %s", err.Error())
+			////if err := tomlTree.Unmarshal(config); err != nil {
+			////	return fmt.Errorf("could not load toml tree into custom config: %s", err.Error())
+			////}
+			if err := yaml.Unmarshal(yamlFile, config); err != nil {
+				return fmt.Errorf("could not load yaml into custom config: %s", err.Error())
 			}
 			// Must apply override before pushing into Configuration Provider
 			overrideCount, err = cp.envVars.OverrideConfiguration(config)
@@ -492,10 +527,23 @@ func CreateProviderClient(
 }
 
 // loadPrivateFromFile attempts to read the configuration toml file
-func (cp *Processor) loadPrivateFromFile() (*toml.Tree, error) {
+//func (cp *Processor) loadPrivateFromFile_origin() (*toml.Tree, error) {
+//	// pull the private config and convert it to a map[string]any
+//	filePath := GetConfigLocation(cp.lc, cp.flags)
+//	contents, err := toml.LoadFile(filePath)
+//	if err != nil {
+//		return nil, fmt.Errorf("could not load private configuration file (%s): %s", filePath, err.Error())
+//	}
+//	cp.lc.Info(fmt.Sprintf("Loaded private configuration from %s", filePath))
+//
+//	return contents, nil
+//}
+
+// loadPrivateFromFile attempts to read the configuration yaml file
+func (cp *Processor) loadPrivateFromFile() ([]byte, error) {
 	// pull the private config and convert it to a map[string]any
 	filePath := GetConfigLocation(cp.lc, cp.flags)
-	contents, err := toml.LoadFile(filePath)
+	contents, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("could not load private configuration file (%s): %s", filePath, err.Error())
 	}
