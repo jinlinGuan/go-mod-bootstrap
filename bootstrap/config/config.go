@@ -752,6 +752,33 @@ func (cp *Processor) loadConfigYamlFromFile(yamlFile string) (map[string]any, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshall configuration file %s: %s", yamlFile, err.Error())
 	}
+
+	for key, value := range data {
+		newValue := value
+		if key == writableKey {
+			if writable, ok := value.(map[string]any); ok {
+				for innerK, innerV := range writable {
+					if innerK == insecureSecretsKey {
+						if insecureSecretsMap, ok := innerV.(map[string]any); ok {
+							newInnerV := insecureSecretsMap
+							var insecureSecrets config.InsecureSecrets
+							err = utils.ConvertFromMap(insecureSecretsMap, &insecureSecrets)
+							if err == nil {
+								for k, v := range insecureSecrets {
+									newV := v
+									newV.SecretName = url.QueryEscape(v.SecretName)
+									insecureSecrets[k] = newV
+								}
+							}
+							_ = utils.ConvertToMap(insecureSecrets, &newInnerV)
+						}
+					}
+				}
+			}
+			data[key] = newValue
+		}
+	}
+
 	return data, nil
 }
 
